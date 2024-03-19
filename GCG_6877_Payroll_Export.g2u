@@ -1,0 +1,132 @@
+﻿Program.Sub.Preflight.Start
+v.Global.sFileLocation.Declare
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+'this run from Shop Floor Control > transactions > transfer labor to payroll
+
+Function.Intrinsic.Control.If(V.Caller.Hook,<>,15290)
+	Function.Intrinsic.Control.End
+Function.Intrinsic.Control.EndIf
+F.Intrinsic.Control.CallSub(Process)
+
+Program.Sub.Main.End
+
+Program.Sub.Process.Start
+v.Local.sDate.Declare
+v.Local.sTime.Declare
+v.Local.sId.Declare
+v.Local.sSQL.Declare
+v.Local.sTemp.Declare
+f.Intrinsic.Control.Try
+	
+	F.ODBC.Connection!con.OpenCompanyConnection(300)
+	'Passing date and time values to grab correct records from table
+	Function.Intrinsic.String.Left(Variable.Passed.888888,8,Variable.Local.sDate)
+	Function.Intrinsic.String.Mid(Variable.Passed.888888,9,6,Variable.Local.sTime)
+	Function.Intrinsic.String.Mid(Variable.Passed.888888,15,2,Variable.Local.sId)
+	
+	
+	'Create and add company ID column because it has to be first in the excel document
+	f.Data.DataTable.Create("dtHours",true)
+	f.Data.DataTable.AddColumn("dtHours","Company ID","String","12123847") 'Default Company ID used by customer
+	
+	'Sum hours and group by employee just in case there are employees with time and a half or double record types
+	Function.intrinsic.string.concat("SELECT EMPLOYEE as 'Worker ID', Type as 'Pay Component', SUM(CAST(HOURS as DECIMAL(4,2))) as Hours from PYRL_LABOR_XFER WHERE RUN_CYMD = '",v.Local.sDate,"' AND RUN_TIME = '",v.Local.sTime,"' group by employee, type",v.Local.sSQL)
+
+	f.Data.DataTable.CreateFromSQL("dtTemp","con",v.Local.sSQL,true)
+	f.Data.DataTable.Merge("dtTemp","dtHours",true,4)
+	f.Data.DataTable.Close("dtTemp")
+	f.Intrinsic.Control.CallSub(AddColumns)		
+	f.Intrinsic.Control.CallSub(CreateDir)
+	
+	F.Intrinsic.UI.ShowSaveFileDialog("GCG_6877_Payroll_Export.csv","CSV[.csv]|*.csv",V.Local.sTemp)
+	
+	F.Intrinsic.Control.If(V.Local.sTemp,<>,"***CANCEL***")
+		'Saving file to selected path
+		f.Data.DataTable.SaveToCSV("dtHours",v.Local.sTemp,True)
+		'Opening file
+		F.Intrinsic.Task.ShellExec(V.Caller.Handle,"",V.Local.sTemp,"","",1)
+	F.Intrinsic.Control.Else
+		'Saving file to custom directory
+		f.Intrinsic.String.Build("{0}GCG_6877_Payroll_Export.csv",v.Global.sFileLocation,v.Local.sTemp)
+		f.Data.DataTable.SaveToCSV("dtHours",v.Local.sTemp,True)
+		F.Intrinsic.UI.Msgbox("File has been saved to GSS custom folder by default so that data will not be lost.  Click OK to open folder.") 
+		'Opening file
+		F.Intrinsic.Task.ShellExec(V.Caller.Handle,"",V.Global.sFileLocation,"","",1)
+	F.Intrinsic.Control.EndIf
+	
+	f.ODBC.Connection!con.Close
+	Function.Intrinsic.Control.End
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+Program.Sub.Process.End
+
+Program.Sub.AddColumns.Start
+v.Local.iC.Declare
+
+f.Intrinsic.Control.Try
+	'Adding other requested columns
+	f.Data.DataTable.AddColumn("dtHours","Rate","String")
+	f.Data.DataTable.AddColumn("dtHours","Rate Number","String")
+	
+	'Loop through to change type to spelled out form
+	f.Intrinsic.Control.For(v.Local.iC,0,v.DataTable.dtHours.RowCount--,1)
+		f.Intrinsic.Control.If(v.DataTable.dtHours(v.Local.iC).Pay Component!FieldValTrim,=,"RT")
+			f.Data.DataTable.SetValue("dtHours",v.Local.iC,"Pay Component","Hourly")			
+		f.Intrinsic.Control.ElseIf(v.DataTable.dtHours(v.Local.iC).Pay Component!FieldValTrim,=,"OT")
+			f.Data.DataTable.SetValue("dtHours",v.Local.iC,"Pay Component","Overtime")			
+		f.Intrinsic.Control.Else
+			f.Data.DataTable.SetValue("dtHours",v.Local.iC,"Pay Component","Double")
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Next(v.Local.iC)
+		
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+Program.Sub.AddColumns.End
+
+Program.Sub.CreateDir.Start
+V.Local.bRet.Declare(Boolean,False)
+f.Intrinsic.Control.Try
+	
+	'Creating custom directory in Global file path if its not there
+	F.Intrinsic.Control.If(V.Caller.GlobalDir.Right1,=,"\")
+		F.Intrinsic.String.Build("{0}Custom\",V.Caller.GlobalDir,V.Global.sFileLocation)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Build("{0}\Custom\",V.Caller.GlobalDir,V.Global.sFileLocation)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.File.DirExists(V.Global.sFileLocation,V.Local.bRet)
+	
+	F.Intrinsic.Control.If(V.Local.bRet,=,False)
+		F.Intrinsic.File.CreateDir(V.Global.sFileLocation)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.String.Build("{0}6877\",V.Global.sFileLocation,V.Global.sFileLocation)
+	
+	F.Intrinsic.File.DirExists(V.Global.sFileLocation,V.Local.bRet)
+	
+	F.Intrinsic.Control.If(V.Local.bRet,=,False)
+		F.Intrinsic.File.CreateDir(V.Global.sFileLocation)
+	F.Intrinsic.Control.EndIf
+
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+Program.Sub.CreateDir.End
+
+Program.Sub.ErrorMsg.Start
+v.Local.sError.Declare
+f.Intrinsic.String.Build("Project GCG_6877_Payroll_Export.g2u {0}{0}Subroutine: {1}{0}Error: {2} with Description: {3}", v.Ambient.NewLine, v.Args.CurrentSub, v.Ambient.ErrorNumber, v.Ambient.ErrorDescription, v.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+f.ODBC.Connection!con.Close
+f.Intrinsic.Control.End
+Program.Sub.ErrorMsg.End
+
+Program.Sub.Comments.Start
+${$5$}$3.0.0.0$}$1
+${$6$}$ghuff$}$20220912150129017$}$s89N93NTeas40rhsU1ZwRbCBj1OiVVM1rkYRCVbQKVTqR21X3o5zWpXGPag9mCVT+sY9JBo3yTA=
+Program.Sub.Comments.End
